@@ -11,7 +11,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from gptclient import InvokeGPT
-from memory_system import memory_system
+from memory_client import MemoryClient
 from data_tools import data_analyzer
 
 
@@ -42,6 +42,7 @@ class MemoryEnhancedLLMClient:
     
     def __init__(self, model: str = "gpt-4o-mini"):
         self.gpt_client = InvokeGPT(model=model)
+        self.memory_client = MemoryClient()
         self.model = model
     
     async def get_response(self, messages: List[OpenAIMessage]) -> ChatCompletionResponse:
@@ -66,7 +67,7 @@ class MemoryEnhancedLLMClient:
                 response_content = self._handle_data_analysis(user_message)
                 if response_content:
                     # Store conversation in memory
-                    memory_system.add_conversation_turn(
+                    self.memory_client.store_conversation(
                         user_message=user_message,
                         assistant_message=response_content,
                         metadata={"has_data": True, "model": self.model, "type": "data_analysis"}
@@ -87,10 +88,10 @@ class MemoryEnhancedLLMClient:
                     )
             
             # Handle memory-specific queries
-            memory_response = self._handle_memory_queries(user_message)
+            memory_response = self.memory_client.handle_memory_query(user_message)
             if memory_response:
                 # Store conversation in memory
-                memory_system.add_conversation_turn(
+                self.memory_client.store_conversation(
                     user_message=user_message,
                     assistant_message=memory_response,
                     metadata={"has_data": data_analyzer.data is not None, "model": self.model, "type": "memory_query"}
@@ -147,15 +148,15 @@ class MemoryEnhancedLLMClient:
             
             # Store conversation in memory
             if user_message:
-                memory_system.add_conversation_turn(
+                self.memory_client.store_conversation(
                     user_message=user_message,
                     assistant_message=assistant_message,
                     metadata={"has_data": data_analyzer.data is not None, "model": self.model, "type": "chat"}
                 )
                 
                 # Save memory periodically
-                if len(memory_system.memories) % 10 == 0:
-                    memory_system.save_memories()
+                if self.memory_client.should_save_memories():
+                    self.memory_client.save_memories()
             
             return formatted_response
             
@@ -175,7 +176,7 @@ class MemoryEnhancedLLMClient:
             Enhanced message list with system message
         """
         # Get relevant context from memory
-        memory_context = memory_system.get_conversation_context(user_message)
+        memory_context = self.memory_client.get_conversation_context(user_message)
         
         # Build enhanced system message
         system_content = "You are a helpful AI assistant with access to conversation history and uploaded data. Provide clear, concise, and helpful responses."
@@ -214,44 +215,6 @@ class MemoryEnhancedLLMClient:
         
         return any(keyword in message_lower for keyword in data_keywords)
     
-    def _handle_memory_queries(self, user_message: str) -> Optional[str]:
-        """Handle memory-specific queries"""
-        message_lower = user_message.lower()
-        
-        # Check for memory-related queries
-        if any(phrase in message_lower for phrase in ['what did we discuss', 'what data', 'previous files', 'memory', 'remember', 'recall']):
-            stats = memory_system.get_memory_stats()
-            recent_memories = memory_system.get_recent_memories(hours=24)
-            
-            response = f"I have {stats['total_memories']} memories stored. "
-            if recent_memories:
-                response += f"In the last 24 hours, we've discussed:\n"
-                for memory in recent_memories[:3]:
-                    content_preview = memory.content[:100].replace('\n', ' ')
-                    response += f"- {content_preview}...\n"
-            else:
-                response += "No recent conversations found."
-            
-            # Add memory type breakdown
-            if 'entry_types' in stats:
-                response += f"\nMemory breakdown: {dict(stats['entry_types'])}"
-            
-            return response
-        
-        # Handle "remember when" or "previous" queries
-        if any(word in message_lower for word in ['remember when', 'previous', 'before', 'earlier', 'told', 'said']):
-            # Search for relevant memories
-            relevant_memories = memory_system.search_memories(user_message, k=3, min_similarity=0.3)
-            if relevant_memories:
-                response = "I found some relevant previous conversations:\n\n"
-                for i, (memory, similarity) in enumerate(relevant_memories, 1):
-                    content_preview = memory.content[:200].replace('\n', ' ')
-                    response += f"{i}. {content_preview}...\n"
-                response += "\nIs this what you were referring to?"
-                return response
-        
-        return None
-    
     def _handle_data_analysis(self, user_message: str) -> Optional[str]:
         """Handle data analysis queries with memory integration"""
         message_lower = user_message.lower()
@@ -268,7 +231,7 @@ class MemoryEnhancedLLMClient:
             response = "\n".join(result.get("results", ["No results found."]))
             
             # Store analysis result in memory
-            memory_system.add_analysis_result(
+            self.memory_client.store_analysis_result(
                 query=user_message,
                 result=response,
                 metadata={"query_type": "data_info"}
@@ -310,7 +273,7 @@ class MemoryEnhancedLLMClient:
             response = f"📊 Created {result['chart_type']} chart: {result['title']}\n{result['description']}\n\n[CHART:{result['chart_id']}:{result['plotly_json']}]"
             
             # Store chart info in memory
-            memory_system.add_chart_info(chart_type, result)
+            self.memory_client.store_chart_info(chart_type, result)
             
             return response
         
@@ -326,7 +289,7 @@ class MemoryEnhancedLLMClient:
             response += "\nJust ask me to create any of these charts!"
             
             # Store suggestion request in memory
-            memory_system.add_analysis_result(
+            self.memory_client.store_analysis_result(
                 query=user_message,
                 result=response,
                 metadata={"query_type": "chart_suggestions"}
@@ -391,7 +354,7 @@ async def main():
     
     print("Testing memory-enhanced LLM client...")
     print(f"Using model: {client.model}")
-    print(f"Memory system active: {len(memory_system.memories)} memories stored")
+    print(f"Memory system active: {client.memory_client.get_memory_count()} memories stored")
     
     response = await client.get_response(test_messages)
     

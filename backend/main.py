@@ -13,7 +13,7 @@ import uvicorn
 from llm_client import MemoryEnhancedLLMClient, format_messages_for_llm
 from gptclient import OpenAIMessage
 from data_tools import data_analyzer
-from memory_system import memory_system
+from memory_client import MemoryClient
 
 
 # Pydantic models for request/response
@@ -51,8 +51,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize LLM client
+# Initialize components
 llm_client = MemoryEnhancedLLMClient()
+memory_client = MemoryClient()
 
 
 @app.get("/")
@@ -144,7 +145,7 @@ async def upload_file(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail=result["message"])
         
         # Store file information in memory
-        memory_system.add_file_data(file.filename, result)
+        memory_client.add_file_data(file.filename, result)
         
         # Add chart suggestions
         suggestions = data_analyzer.get_chart_suggestions()
@@ -203,7 +204,7 @@ async def create_visualization(request: dict):
 @app.get("/api/memory/stats")
 async def get_memory_stats():
     """Get memory system statistics"""
-    return memory_system.get_memory_stats()
+    return memory_client.get_memory_stats()
 
 
 @app.post("/api/memory/search")
@@ -216,7 +217,7 @@ async def search_memory(request: dict):
     if not query:
         raise HTTPException(status_code=400, detail="Query parameter is required")
     
-    results = memory_system.search_memories(query, k, min_similarity)
+    results = memory_client.search_memories(query, k, min_similarity)
     
     return {
         "query": query,
@@ -236,7 +237,7 @@ async def search_memory(request: dict):
 @app.get("/api/health")
 async def health_check():
     """Detailed health check with memory system status"""
-    memory_stats = memory_system.get_memory_stats()
+    memory_stats = memory_client.get_memory_stats()
     
     return {
         "status": "healthy",
