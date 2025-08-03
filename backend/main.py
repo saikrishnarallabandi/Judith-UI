@@ -29,12 +29,6 @@ class ChatRequest(BaseModel):
     temperature: float = 0.7
 
 
-class ChatResponse(BaseModel):
-    choices: List[Dict[str, Any]]
-    usage: Dict[str, int]
-    model: str
-
-
 # Initialize FastAPI app
 app = FastAPI(
     title="Custom LLM API",
@@ -62,16 +56,16 @@ async def root():
     return {"message": "Custom LLM API is running", "status": "healthy"}
 
 
-@app.post("/api/chat", response_model=ChatResponse)
+@app.post("/api/chat")
 async def chat_completion(request: ChatRequest):
     """
-    OpenAI-compatible chat completion endpoint
+    Chat completion endpoint
     
     Args:
         request: Chat completion request with messages
         
     Returns:
-        Chat completion response
+        Simple chat response with content
     """
     try:
         # Convert Pydantic models to OpenAIMessage objects
@@ -80,15 +74,18 @@ async def chat_completion(request: ChatRequest):
             for msg in request.messages
         ]
         
-        # Get response from LLM client
-        response = await llm_client.get_response(messages)
+        # Get response content from LLM client
+        response_content = await llm_client.get_response(messages)
         
-        # Return response in OpenAI format
-        return ChatResponse(
-            choices=response.choices,
-            usage=response.usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            model=request.model
-        )
+        # Return simple response format
+        return {
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": response_content
+                }
+            }]
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating response: {str(e)}")

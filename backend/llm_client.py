@@ -22,11 +22,7 @@ class OpenAIMessage:
     content: str
 
 
-@dataclass
-class ChatCompletionResponse:
-    """Response format matching OpenAI API"""
-    choices: List[Dict[str, Any]]
-    usage: Optional[Dict[str, int]] = None
+
 
 
 def create_openai_message(role: str, content: str) -> OpenAIMessage:
@@ -45,7 +41,7 @@ class MemoryEnhancedLLMClient:
         self.memory_client = MemoryClient()
         self.model = model
     
-    async def get_response(self, messages: List[OpenAIMessage]) -> ChatCompletionResponse:
+    async def get_response(self, messages: List[OpenAIMessage]) -> str:
         """
         Get response from LLM with memory-enhanced context and data analysis
         
@@ -53,7 +49,7 @@ class MemoryEnhancedLLMClient:
             messages: List of conversation messages
             
         Returns:
-            ChatCompletionResponse with generated content
+            Assistant response content as string
         """
         try:
             # Get the latest user message for memory context
@@ -73,19 +69,7 @@ class MemoryEnhancedLLMClient:
                         metadata={"has_data": True, "model": self.model, "type": "data_analysis"}
                     )
                     
-                    return ChatCompletionResponse(
-                        choices=[{
-                            "message": {
-                                "role": "assistant",
-                                "content": response_content
-                            }
-                        }],
-                        usage={
-                            "prompt_tokens": len(user_message) // 4,
-                            "completion_tokens": len(response_content) // 4,
-                            "total_tokens": (len(user_message) + len(response_content)) // 4
-                        }
-                    )
+                    return response_content
             
             # Handle memory-specific queries
             memory_response = self.memory_client.handle_memory_query(user_message)
@@ -97,19 +81,7 @@ class MemoryEnhancedLLMClient:
                     metadata={"has_data": data_analyzer.data is not None, "model": self.model, "type": "memory_query"}
                 )
                 
-                return ChatCompletionResponse(
-                    choices=[{
-                        "message": {
-                            "role": "assistant",
-                            "content": memory_response
-                        }
-                    }],
-                    usage={
-                        "prompt_tokens": len(user_message) // 4,
-                        "completion_tokens": len(memory_response) // 4,
-                        "total_tokens": (len(user_message) + len(memory_response)) // 4
-                    }
-                )
+                return memory_response
             
             # Build enhanced messages with memory context and system message
             enhanced_messages = self._build_enhanced_messages(messages, user_message)
@@ -128,24 +100,6 @@ class MemoryEnhancedLLMClient:
             # Extract assistant message from OpenAI response
             assistant_message = response.choices[0].message.content or "I apologize, but I couldn't generate a response."
             
-            # Convert to our response format
-            formatted_response = ChatCompletionResponse(
-                choices=[{
-                    "message": {
-                        "role": "assistant",
-                        "content": assistant_message
-                    }
-                }],
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                    "total_tokens": response.usage.total_tokens if response.usage else 0
-                }
-            )
-            
-            # Extract assistant message
-            assistant_message = formatted_response.choices[0]["message"]["content"]
-            
             # Store conversation in memory
             if user_message:
                 self.memory_client.store_conversation(
@@ -158,11 +112,11 @@ class MemoryEnhancedLLMClient:
                 if self.memory_client.should_save_memories():
                     self.memory_client.save_memories()
             
-            return formatted_response
+            return assistant_message
             
         except Exception as e:
             logging.error(f"Error getting LLM response: {e}")
-            return self._create_fallback_response(f"I encountered an error: {str(e)}")
+            return f"I encountered an error: {str(e)}"
     
     def _build_enhanced_messages(self, messages: List[OpenAIMessage], user_message: str) -> List[OpenAIMessage]:
         """
@@ -313,26 +267,7 @@ class MemoryEnhancedLLMClient:
                 found_columns.append(col)
         
         return found_columns
-    
-    def _create_fallback_response(self, error_message: str) -> ChatCompletionResponse:
-        """Create a fallback response for errors"""
-        return ChatCompletionResponse(
-            choices=[{
-                "message": {
-                    "role": "assistant",
-                    "content": error_message
-                }
-            }],
-            usage={
-                "prompt_tokens": 0,
-                "completion_tokens": len(error_message) // 4,
-                "total_tokens": len(error_message) // 4
-            }
-        )
 
-
-# Type aliases for compatibility
-OpenAIResponse = ChatCompletionResponse
 
 def format_messages_for_llm(messages: List[Dict[str, str]]) -> List[OpenAIMessage]:
     """Convert message dictionaries to OpenAIMessage objects"""
