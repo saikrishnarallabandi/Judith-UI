@@ -2,15 +2,24 @@ import { useEffect, useRef } from 'react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Copy, User, Robot } from '@phosphor-icons/react'
+import { Copy, User, Robot, FileText, ChartBar } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { ChartDisplay } from '@/components/ChartDisplay'
 
 interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
   timestamp: number
+  fileData?: any
+  chartData?: {
+    id: string
+    type: string
+    title: string
+    description: string
+    plotly_json: string
+  }
 }
 
 interface ChatMessagesProps {
@@ -38,6 +47,27 @@ function MessageBubble({ message }: { message: Message }) {
     })
   }
 
+  // Parse chart data from message content
+  const parseCharts = (content: string) => {
+    const chartRegex = /\[CHART:([^:]+):([^\]]+)\]/g
+    const charts: Array<{id: string, data: string}> = []
+    let match
+    let cleanContent = content
+
+    while ((match = chartRegex.exec(content)) !== null) {
+      charts.push({
+        id: match[1],
+        data: match[2]
+      })
+      // Remove chart markers from display content
+      cleanContent = cleanContent.replace(match[0], '')
+    }
+
+    return { charts, cleanContent: cleanContent.trim() }
+  }
+
+  const { charts, cleanContent } = parseCharts(message.content)
+
   return (
     <div className={cn(
       "group flex gap-4 p-4 hover:bg-muted/30 transition-colors",
@@ -62,11 +92,42 @@ function MessageBubble({ message }: { message: Message }) {
           </span>
         </div>
         
-        <div className="prose prose-sm max-w-none break-words">
-          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">
-            {message.content}
-          </pre>
-        </div>
+        {/* File upload indicator */}
+        {message.fileData && (
+          <div className="mb-3 p-3 bg-accent/50 rounded-lg border">
+            <div className="flex items-center gap-2">
+              <FileText size={16} className="text-accent-foreground" />
+              <span className="text-sm font-medium">
+                Uploaded: {message.fileData.filename}
+              </span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {message.fileData.shape[0]} rows × {message.fileData.shape[1]} columns
+            </div>
+          </div>
+        )}
+        
+        {/* Message content */}
+        {cleanContent && (
+          <div className="prose prose-sm max-w-none break-words">
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground">
+              {cleanContent}
+            </pre>
+          </div>
+        )}
+        
+        {/* Charts */}
+        {charts.map((chart, index) => (
+          <div key={index} className="mt-4">
+            <div className="flex items-center gap-2 mb-2">
+              <ChartBar size={16} className="text-primary" />
+              <span className="text-sm font-medium text-primary">
+                Data Visualization
+              </span>
+            </div>
+            <ChartDisplay chartData={chart.data} />
+          </div>
+        ))}
         
         <Button
           variant="ghost"

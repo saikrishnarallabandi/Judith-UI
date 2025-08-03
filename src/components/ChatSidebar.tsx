@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Plus, MessageCircle, Menu, X } from '@phosphor-icons/react'
-import { useKV } from '@github/spark/hooks'
+import { Plus, ChatCircle, List, X } from '@phosphor-icons/react'
+// import { useKV } from '@github/spark/hooks'
 import { cn } from '@/lib/utils'
 
 interface Conversation {
@@ -97,7 +97,7 @@ export function ChatSidebar({
             <div className="space-y-2 pb-4">
               {conversations.length === 0 ? (
                 <div className="text-center text-muted-foreground py-8">
-                  <MessageCircle size={32} className="mx-auto mb-2 opacity-50" />
+                  <ChatCircle size={32} className="mx-auto mb-2 opacity-50" />
                   <p className="text-sm">No conversations yet</p>
                 </div>
               ) : (
