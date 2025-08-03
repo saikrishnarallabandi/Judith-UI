@@ -9,9 +9,29 @@ import re
 import json
 import logging
 from typing import List, Dict, Any, Optional
-from gptclient import InvokeGPT, OpenAIMessage, ChatCompletionResponse, create_openai_message
+from dataclasses import dataclass
+from gptclient import InvokeGPT
 from memory_system import memory_system
 from data_tools import data_analyzer
+
+
+@dataclass
+class OpenAIMessage:
+    """Represents a message in OpenAI format"""
+    role: str  # 'system', 'user', or 'assistant'
+    content: str
+
+
+@dataclass
+class ChatCompletionResponse:
+    """Response format matching OpenAI API"""
+    choices: List[Dict[str, Any]]
+    usage: Optional[Dict[str, int]] = None
+
+
+def create_openai_message(role: str, content: str) -> OpenAIMessage:
+    """Create a new OpenAI format message"""
+    return OpenAIMessage(role=role, content=content)
 
 
 class MemoryEnhancedLLMClient:
@@ -66,9 +86,6 @@ class MemoryEnhancedLLMClient:
                         }
                     )
             
-            # Get relevant context from memory
-            memory_context = memory_system.get_conversation_context(user_message)
-            
             # Handle memory-specific queries
             memory_response = self._handle_memory_queries(user_message)
             if memory_response:
@@ -93,20 +110,40 @@ class MemoryEnhancedLLMClient:
                     }
                 )
             
-            # Build enhanced system message with memory context
-            system_content = "You are a helpful AI assistant with access to conversation history and uploaded data. Provide clear, concise, and helpful responses."
+            # Build enhanced messages with memory context and system message
+            enhanced_messages = self._build_enhanced_messages(messages, user_message)
             
-            if memory_context:
-                system_content += f"\n\nRelevant context from previous conversations and data:\n{memory_context}"
+            # Convert to OpenAI format
+            openai_messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in enhanced_messages
+            ]
             
-            if data_analyzer.data is not None:
-                system_content += "\n\nYou have access to uploaded data and can perform data analysis and create visualizations."
+            # Get response from GPT client (wrap sync call in async)
+            response = await asyncio.get_event_loop().run_in_executor(
+                None, self.gpt_client.get_response, openai_messages
+            )
             
-            # Get response from GPT client with enhanced system message
-            response = await self.gpt_client.get_response(messages, system_content)
+            # Extract assistant message from OpenAI response
+            assistant_message = response.choices[0].message.content or "I apologize, but I couldn't generate a response."
+            
+            # Convert to our response format
+            formatted_response = ChatCompletionResponse(
+                choices=[{
+                    "message": {
+                        "role": "assistant",
+                        "content": assistant_message
+                    }
+                }],
+                usage={
+                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                    "total_tokens": response.usage.total_tokens if response.usage else 0
+                }
+            )
             
             # Extract assistant message
-            assistant_message = response.choices[0]["message"]["content"]
+            assistant_message = formatted_response.choices[0]["message"]["content"]
             
             # Store conversation in memory
             if user_message:
@@ -120,11 +157,47 @@ class MemoryEnhancedLLMClient:
                 if len(memory_system.memories) % 10 == 0:
                     memory_system.save_memories()
             
-            return response
+            return formatted_response
             
         except Exception as e:
             logging.error(f"Error getting LLM response: {e}")
             return self._create_fallback_response(f"I encountered an error: {str(e)}")
+    
+    def _build_enhanced_messages(self, messages: List[OpenAIMessage], user_message: str) -> List[OpenAIMessage]:
+        """
+        Build enhanced message list with system message including memory context
+        
+        Args:
+            messages: Original conversation messages
+            user_message: Latest user message for memory context
+            
+        Returns:
+            Enhanced message list with system message
+        """
+        # Get relevant context from memory
+        memory_context = memory_system.get_conversation_context(user_message)
+        
+        # Build enhanced system message
+        system_content = "You are a helpful AI assistant with access to conversation history and uploaded data. Provide clear, concise, and helpful responses."
+        
+        if memory_context:
+            system_content += f"\n\nRelevant context from previous conversations and data:\n{memory_context}"
+        
+        if data_analyzer.data is not None:
+            system_content += "\n\nYou have access to uploaded data and can perform data analysis and create visualizations."
+        
+        # Create enhanced message list
+        enhanced_messages = []
+        
+        # Add system message
+        enhanced_messages.append(OpenAIMessage(role="system", content=system_content))
+        
+        # Add conversation messages (skip existing system messages)
+        for msg in messages:
+            if msg.role != "system":
+                enhanced_messages.append(msg)
+        
+        return enhanced_messages
     
     def _is_data_analysis_request(self, user_message: str) -> bool:
         """Check if the user message is requesting data analysis"""
